@@ -1,0 +1,155 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// OLED settings
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// Pin configuration
+#define SOUND_SENSOR_PIN 1
+#define BUTTON_PIN 18
+
+// Animation variables
+float angleOffset = 0.0;     // For rotation
+int numTurns = 5;            // Initial number of turns
+int animationStyle = 0;      // 0: Helix, 1: Dynamic Ring, 2: Spiral
+float amplitude = 10.0;      // Amplitude for helix
+bool buttonPressed = false;  // Track button state
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(7, 6);
+  // Initialize OLED
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("OLED allocation failed"));
+    for (;;);
+  }
+  display.clearDisplay();
+
+  // Initialize pins
+  pinMode(SOUND_SENSOR_PIN, INPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+}
+
+void loop() {
+  // Check button press to change animation style
+  if (digitalRead(BUTTON_PIN) == LOW && !buttonPressed) {
+    animationStyle = (animationStyle + 1) % 4; // Cycle through 0, 1, 2
+    buttonPressed = true;
+    delay(200); // Debounce
+  } else if (digitalRead(BUTTON_PIN) == HIGH) {
+    buttonPressed = false;
+  }
+
+  // Read and smooth sound level
+  int soundLevel = smoothSound(analogRead(SOUND_SENSOR_PIN));
+
+  // Smooth amplitude transitions
+  static float currentAmplitude = 10.0;
+  float targetAmplitude = map(soundLevel, 0, 4095, 5, 30);
+  currentAmplitude = 0.1 * targetAmplitude + 0.9 * currentAmplitude;
+  amplitude = currentAmplitude;
+
+  // Smooth rotation
+  static float currentAngleOffset = 0.0;
+  float targetAngleOffset = angleOffset + 0.1;
+  currentAngleOffset = 0.1 * targetAngleOffset + 0.9 * currentAngleOffset;
+  angleOffset = currentAngleOffset;
+
+  // Dynamically adjust number of turns
+  static float currentNumTurns = 5.0;
+  float targetNumTurns = map(soundLevel, 0, 4095, 3, 12);
+  currentNumTurns = 0.1 * targetNumTurns + 0.9 * currentNumTurns;
+  numTurns = round(currentNumTurns);
+
+  // Clear the display
+  display.clearDisplay();
+
+  // Draw the selected animation
+  if (animationStyle == 0) {
+    drawDynamicHelix(amplitude, numTurns, angleOffset, soundLevel);
+  } else if (animationStyle == 1) {
+    drawPulsingRing(amplitude, angleOffset, soundLevel);
+  } else if (animationStyle == 2) {
+    drawSpiral(amplitude, angleOffset, soundLevel);
+  } else if (animationStyle == 3) {
+    drawSoundWave(amplitude, angleOffset, soundLevel);
+  }
+
+  // Show the animation
+  display.display();
+
+  delay(10); // Frame rate adjustment
+}
+
+int smoothSound(int rawSound) {
+  static float smoothedValue = 0;
+  float alpha = 0.5; // Smoothing factor: lower = smoother, higher = faster response
+  smoothedValue = alpha * rawSound + (1 - alpha) * smoothedValue;
+  return (int)smoothedValue;
+}
+
+void drawDynamicHelix(float amplitude, int turns, float rotationAngle, int soundLevel) {
+  const float step = 1.5; // Angle step in radians (smoother visuals)
+  int centerX = SCREEN_WIDTH / 2;
+  int centerY = SCREEN_HEIGHT / 2;
+
+  for (float theta = 0; theta < turns * 2 * PI; theta += step) {
+    // Create dynamic amplitude variation
+    float dynamicAmplitude = amplitude + sin(theta + rotationAngle) * 5;
+
+    // Calculate polar coordinates
+    float r = dynamicAmplitude * sin(theta);
+    float x = r * cos(theta + rotationAngle) + centerX;
+    float y = r * sin(theta + rotationAngle) + centerY;
+
+    // Draw pixel
+    display.drawPixel((int)x, (int)y, SSD1306_WHITE);
+  }
+}
+
+void drawPulsingRing(float amplitude, float rotationAngle, int soundLevel) {
+  int centerX = SCREEN_WIDTH / 2;
+  int centerY = SCREEN_HEIGHT / 2;
+  const float step = 0.1;
+
+  // Radius modulated by sound level
+  float radius = map(soundLevel, 0, 4095, 10, 30);
+
+  for (float theta = 0; theta < 2 * PI; theta += step) {
+    // Calculate dynamic pulse effect
+    float x = centerX + (radius + sin(rotationAngle) * amplitude) * cos(theta);
+    float y = centerY + (radius + sin(rotationAngle) * amplitude) * sin(theta);
+
+    // Draw point
+    display.drawPixel((int)x, (int)y, SSD1306_WHITE);
+  }
+}
+
+void drawSpiral(float amplitude, float rotationAngle, int soundLevel) {
+  int centerX = SCREEN_WIDTH / 2;
+  int centerY = SCREEN_HEIGHT / 2;
+  const float step = 0.2;
+
+  float maxRadius = map(soundLevel, 0, 4095, 10, 40);
+
+  for (float theta = 0; theta < 6 * PI; theta += step) {
+    float r = maxRadius * (theta / (6 * PI));
+    float x = centerX + r * cos(theta + rotationAngle);
+    float y = centerY + r * sin(theta + rotationAngle);
+
+    display.drawPixel((int)x, (int)y, SSD1306_WHITE);
+  }
+}
+
+void drawSoundWave(float amplitude, float rotationAngle, int soundLevel) {
+  int centerX = SCREEN_WIDTH / 2;
+  int centerY = SCREEN_HEIGHT / 2;
+
+  float radius = map(soundLevel, 0, 4095, 5, 30); // Sound-controlled radius
+  for (int i = 0; i < radius; i += 3) {
+    display.drawCircle(centerX, centerY, i + sin(rotationAngle) * amplitude, SSD1306_WHITE);
+  }
+}
